@@ -1,0 +1,211 @@
+				MICROSERVICES USING SPRING BOOT AND SPRING CLOUD
+
+Playlist: https://www.youtube.com/watch?v=p485kUNpPvE&ab_channel=Amigoscode
+Repo: https://github.com/amigoscode/microservices
+
+Vamos a crear una pequeña app usando un patrón de microservicios.Un MS será customer,que se comunicará con Fraud mediante el broker apache Kafka(RabbitMQ??).También tendremos notificaciones con Twilio??.
+Customer usará PostgreSQL,mientras que Fraud usará MongoDB.Notification usará PostgreSQL también.
+
+IMPORTANTE: Spring Cloud es el módulo dentro del ecosistema Spring que se ocupa de construir Microservicios.Puedo ver en https://spring.io que Spring Cloud es inmenso,igual que el ecosistema Spring, asi que debo tomarlo con calma.
+
+			INSTALAR MAVEN EN EL SISTEMA- CREAR UN PROYECTO CON MAVEN
+
+Para este proyecto vamos a generarlo con maven.Puedo ver si lo tengo instalado tratando de imprimir su version:
+mvn --version (tengo la 3.6.3)
+
+Apache Maven 3.6.3
+Maven home: /usr/share/maven <- y aqui el binario
+Java version: 11.0.13, vendor: Ubuntu, runtime: /usr/lib/jvm/java-11-openjdk-amd64 <- y observo también que está enlazado a java 11 con open-jdk
+
+Si no lo tuviera instalado lo puedo hacer con brew:
+brew install maven <- diria que hay que tener la jdk primero,asinto
+
+Puedo exportarla al path con:
+export PATH=/opt/apache-maven-3.8.4/bin:$PATH (cambiar por mi ruta)
+
+Crear un proyecto.Fijate que creará un directorio con el nombre que le dé a el -DartifactId:
+
+mvn archetype:generate -DgroupId=com.amigoscode -DartifactId=springcloud -DarchetypeArtifactId=maven-archetype-quickstart -DarchetypeVersion=1.4 -DinteractiveMode=false
+
+Ya puedo hacer un cd a springcloud,pues lo he llamado asi al proyecto.Puedo hacer un 'tree' y veré la estructura gráficamente(brew install tree).
+Veré el pom.xml en la raiz y toda la estructura,super útil.
+
+Bien,lo mejor es instalar las jetbrains toolbox desde su web,ya que me dará acceso a todos sus IDEs de forma fácil.Una vez concluido,abro IntelliJ y en file/proyectSettings me bajo el jdk 17 que es LTS y además es el que usaremos en el curso.
+
+					SETTING UP PARENT MODULE DEPENDENCIES
+
+Vamos a usar Maven Multi-module,dejando que cada sub-modulo eliga las subdependencias que importar(cada MS).Para ello engo que usar la tag <dependencyMnagement> de esta forma en el pom padre:
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring.boot.dependencies.version}</version>
+        <scope>import</scope>
+        <type>pom</type>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+Todas las dependencias que ponga aqui podrán ser elegidas por los hijos.Pero también puedo definir una zona con dependencias que tendrán todos,como por ejemplo lombok y spring-boot-starter-test:
+
+  <dependencies>
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+    </dependency>
+  </dependencies>
+
+En resumen,todo lo que englobe en dependencies lo instalarán los hijos,lo que defina en dependencyManagement será elegible,pero no instalado.Fijate que puedo declara variables en la zona properties:
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <spring.boot.maven.plugin.version>2.5.7</spring.boot.maven.plugin.version>
+    <spring.boot.dependencies.version>2.5.7</spring.boot.dependencies.version>
+  </properties>
+
+Y luego inyectar esa version.Al final tengo que ver en Maven/dependencies(a la derecha) las dos dependencias.Puedo ejecutar maven clean y maven validate para ver si compila exitosamente,aunque no tenga código aún lo debe hacer.
+
+				CREANDO NUESTRO PRIMER MICROSERVICE
+
+Bien,situandome en el proyecto click derecho,nuevo modulo y eligo tipo Maven,ya que estamos con maven.Le doy next y el nombre de customer.
+Esto creará una aplicación embebida y varias cosas:
+
+En el parent pom puedo ver que se agregó la tag <modules>:
+ <modules>
+    <module>customer</module>
+  </modules>
+
+En el hijo puedo ver su sección <parent>,especificando quien es su padre:
+
+ <parent>
+    <artifactId>springcloud</artifactId>
+    <groupId>com.amigoscode</groupId>
+    <version>1.0-SNAPSHOT</version>
+ </parent>
+Obviamente esta correcto,pues el artifactId del padre es ese. 
+
+Bien,creo un paquete y la clase anotada con @SpringbootApplication.TAmbién hay que crear el application.yml | application.properties.
+Puedo buscar por 'spring boot banner.txt generator' y copio algun texto a ese banner.txt(que va en resources).No necesita nada más,se verá el banner al ejecutar la pp.
+Ejecuto nuestro primer MS,y veré el banner.Obviamente no tiene nada,pero fue muy fácil enlazarlo realmente.
+Recuerda,docker stop <name> para parar un contenedor,docker start<name>  para arrancar un contenedor parado y docker restart <name> para parar+arrancar.
+
+					MINUTO 33 CREANDO EL MS CUSTOMER
+
+Empiezo por crear el Modelo/Entidad,despues el controlador
+
+IMPORTANTE: fijate que el controlador ha usado un record() y que ese record ha necesitado parentesis,pero parece una clase:
+
+@RestController
+@RequestMapping("api/v1/customers")
+@Slf4j
+public record CustomerController(CustomerService customerService) {
+
+    @PostMapping
+    public void registerCustomer(@RequestBody CustomerRegistrationRequest customerRegistrationRequest) {
+        log.info("new customer registration {}", customerRegistrationRequest);
+    }
+}
+
+Usa un record para ganar inmutabilidad.Fijate que le puede pasar argumentos,lo cual parece muy útil.
+
+Fijate que anotar una clase con @Builder me permite poder usar el patrón Builder,el cual usa un constructor privado:
+
+    public void registerCustomer(CustomerRegistrationRequest request) {
+        Customer customer = Customer.builder()
+                .firstName(request.firstName())
+                .lastName(request.lastName())
+                .email(request.email())
+                .build();
+        // todo: check if email valid
+        // todo: check if email not taken
+        // todo: store customer in db
+        
+    }
+
+Bien,lo siguiente es crear un docker-compose con postgres+pgadmin.Ojo,voy a sacar el postgres por el 5434,pero para el pgadmin lo tiene en el 5432 pues está en la misma interfaz de red y la interfaz por el 5050
+IMPORTANTE: puedo ver con docker volume ls los volumenes y con docker system df | docker system info información sobre todo el sistema Docker(llevo 15G ya de volumenes).
+
+NOTA:fijate que ahora PgAdmin pide una Pass maestra,usé la mediana.Fijate también que siempre va a crear una database con el nombre del usuario,como he usado como user amigoscode tendré esa database,aparte de la de postgres que siempre existe.
+
+Bien,tras configurar correctamente el docker-compose es hora de ir al application.yml.Entiendo que ahora si es el 5434??.Si no cambiar
+
+server:
+  port: 8080
+spring:
+  application:
+    name: customer
+  datasource:
+    username: 'amigoscode'
+    url: jdbc:postgresql://localhost:5434/customer
+    password: 'password'
+    jpa:
+      properties:
+        hibernate:
+          dialect: org.hibernate.dialect.PostgreSQLDialect
+          format_sql: 'true'
+      hibernate:
+        ddl-auto: update
+      show-sql: 'true'
+
+Fijate que no tengo la db creada.Puedo hacerlo desde la interfaz gráfica.Además veré el ownsership de la db,que obviamente va para amigoscode.
+
+IMPORTANTE: faltaría ir al pom.xml de customer y añadir el driver para postgresql
+
+Fijate que 'spring-boot-starter-web' es para crear una REST API,'spring-boot-starter-data-jpa' es para conectar con la api JPA y poder usar Spring Data y 'postgresl' es el driver.Debería verlas en la sección maven tras refrescar.
+
+Terminamos de settear la entidad.Fijate que ha usado el primitivo int por valor
+@Data
+@Builder
+@Entity
+@AllArgsConstructor
+@NoArgsConstructor
+public class Customer {
+    @Id
+    @SequenceGenerator(
+            name="customer_id_sequence",
+            sequenceName = "customer_id_sequence"
+    )
+    @GeneratedValue(
+            strategy = GenerationType.SEQUENCE,
+            generator = "customer_id_sequence"
+    )
+    private Integer id;
+    private String firstName;
+    private String lastName;
+    private String email;
+}
+
+Me falta la interface de acceso a JPA(fijate que debe de ser una interfaz:
+@Repository
+public interface CustomerRepository extends JpaRepository<Customer,Integer>{}
+Realmente no tengo por que declarar métodos,pero si que tengo que crearla.
+
+Inyecto esta interfaz en el servicio,que como es un record pues lo paso al principio:
+@Service
+public record CustomerService(CustomerRepository customerRepository) {
+
+    public void registerCustomer(CustomerRegistrationRequest request) {
+        Customer customer = Customer.builder()
+                .firstName(request.firstName())
+                .lastName(request.lastName())
+                .email(request.email())
+                .build();
+        // todo: check if email valid
+        // todo: check if email not taken
+        // todo: store customer in db
+        customerRepository.save(customer);
+    }
+}
+Fijate que el enpoint ya está esperando un body y llamará a este registerCustomer.Puedo probarlo en Postman.
+Y recuerda que no puedo usar localhost,pero si puedo 127.0.0.1 o 0.0.0.0
+
+							VIDEO 02
+
