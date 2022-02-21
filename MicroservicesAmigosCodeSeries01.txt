@@ -209,3 +209,86 @@ Y recuerda que no puedo usar localhost,pero si puedo 127.0.0.1 o 0.0.0.0
 
 							VIDEO 02
 
+Bien,lo primero que tengo que tener en cuenta es que customer esta usando el puerto 8080 asi que fraud tendrá que usar otro(  Tomcat started on port(s): 8080 (http))
+
+Bien,ya haré esto cuando llegue a ese archivo,de momento agrego la dependencia para REST:
+  <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+    </dependencies>
+
+Y creo la clase que arranque el sistema distribuido anotandola con @SpringbootApplication(y creo este modulo eligiendo module).Creo el application.yaml.
+
+IMPORTANTE: en un proyecto real deberia crear otra DB,sin embargo no lo vamos a hacer por no gastar recursos.Asi que creo la db 'fraud' en la misma imagen 
+
+Bien.La entidad lucirá asi:
+
+@Data
+@Builder
+@AllArgsConstructor
+@NoArgsConstructor
+@Entity
+public class FraudCheckHistory {
+    @Id
+    @SequenceGenerator(
+            name = "fraud_id_sequence",
+            sequenceName = "fraud_id_sequence",
+            )
+    @GeneratedValue(
+            strategy = GenerationType.SEQUENCE,
+            generator = "fraud_id_sequence")
+    private Integer id;
+    private Integer customerId;
+    private Boolean isFraudster;
+    private LocalDateTime createdAt;
+}
+Fijate que las anotó con los mismos @Data @AllArgsConstructor @NoArgsConstructor @Entity y @Builder
+Tiempo del Service y el Controller
+Mayusculas+Intro bajo con el cursor(en VSC es Ctrl+Intro)
+
+NOTA: fijate que puedo traerme un param como Integer:
+
+    @PostMapping(path="{customerId}")
+    public FraudCheckResponse isFraudster(
+            @PathVariable("customerId") Integer customerId) { 
+        boolean isFraudulentCustomer =  fraudCheckService.isFraudulent(customerId);
+        return new FraudCheckResponse( isFraudulentCustomer);
+    }
+
+			MANEJAR COMUNICACIONES ENTRE MICROSERVICIOS
+
+En este punto necesitamos que el customer:8080 se comunique con fraud:8081.hay múltiples formas de hacer esto.Una es usando RestTemplate,otra es usando Service Discovery(de forma que eliminemos el uso de puertos) y también veremos OPEN FAI
+
+METODO RESTTEMPLATE: creo una clase en el modulo 'customer',la anoto con @Configutation y creo un Bean de tipo RestTemplate:
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestTemplate;
+
+@Configuration
+public class CustomerConfig {
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+
+NOTA: con el método saveAndFlush puedo acceder al id en la siguiente linea de código.Es como una Promise,el código va a esperar a que se resuelva ese guardado
+  customerRepository.saveAndFlush(customer);
+        // todo: check if fraudster
+        restTemplate.getForObject("http://localhost:8081/api/v1/fraud-check/{customerId}",
+                FraudCheckResponse.class, customer.getId());
+
+Realmente esto es lo mínimo,y realmente no se usa,ya que no queremos pasar las URLs en duro.¿Y si tuviera dos instancias de customer?Obviamente esta aproximación es de juguete y no se sostiene:
+
+   FraudCheckResponse fraudCheckResponse =  restTemplate.getForObject("http://localhost:8081/api/v1/fraud-check/{customerId}",
+                FraudCheckResponse.class, customer.getId());
+
+        if (fraudCheckResponse.isFraudster()) {
+            throw new IllegalStateException("Customer is a fraudster");
+        }
+
+
