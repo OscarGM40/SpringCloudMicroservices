@@ -291,4 +291,132 @@ Realmente esto es lo mínimo,y realmente no se usa,ya que no queremos pasar las 
             throw new IllegalStateException("Customer is a fraudster");
         }
 
+			VIDEO 03 SERVICE DISCOVERY WITH EUREKA SERVER
+
+Service Discovery es el proceso de automáticamente detectar dispositivos y servicios en una network.Es por esto que detectará los Services de nuestro sistema distribuido.
+En cuanto a un Eureka Server más o menos el flujo es el siguiente(fijese que para el Eureka Server los microservicios son clientes):
+
+PASO 1- Cuando un cliente(un MS) se inicie,se registrará como cliente en el Eureka Server(por ejemplo nuestro customer informaría que está en el 8080 y si tuviera dos copias de fraud dirían al Eureka que están en el 8081 y 8085 por ejemplo
+
+PASO 2- Si ahora un cliente quiere comunicarse con otro,lo primero que hace es mandar una petición al Eureka Server pidiendo la localización de éste(Service Discovery Request)
+
+PASO 3- El Eureka Server responde con esa localización de un cliente registrado al cliente que lo pidió(puede devolver el 8081 o el 8085 si están replicados)
+
+NOTA: El Eureka Server es un SPOF,es un cuello de botella ya que se comunicarán todos con el de forma masiva.Es importante asegurarse que nunca caerá,ya que caería todo el sistema(replicación,backups de la info,etc..)
+
+Instalando Spring Cloud: para instalar Cloud voy a https://spring.io/projects/spring-cloud y eligo la release train deseada(usaremos 2020.0.3)
+En el pom.xml general pego la siguiente dependencia para que la eliga el que quiera(fijate que también dejé la dependencia para spring-boot):
+	
+* En la parte de resolucion de variables
+  <spring.cloud-version>2020.0.3</spring.cloud-version>
+* Ver proyecto si es necesario
+  <dependency>
+     <groupId>org.springframework.cloud</groupId>
+     <artifactId>spring-cloud-dependencies</artifactId>
+     <version>${spring.cloud-version}</version>
+     <type>pom</type>
+     <scope>import</scope>
+ </dependency>
+
+Creo un nuevo modulo maven y lo llamo eureka-server.En su pom.xml inyecto la siguiente dependencia:
+  <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-server</artifactId>
+        </dependency>
+    </dependencies>
+
+Creo su clase starter y fijate que usaré la annotation @EnableEurekaServer:
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cloud.netflix.eureka.server.EnableEurekaServer;
+
+@SpringBootApplication
+@EnableEurekaServer
+public class EurekaServerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(EurekaServerApplication.class, args);
+    }
+}
+
+Creo el application.yml para este modulo eureka-server:
+server:
+  port: 8761
+eureka:
+  client:
+    fetch-registry: false
+    register-with-eureka: false
+
+Fijate que no quiero que el propio servidor se registre a si mismo,por eso van dos falses.
+
+Arranco la aplicación y puedo ir a localhost:8761 y ver el dashboard de Eureka Server.La zona que me importa es donde dice 'Instances currently registered with Eureka',y obviamente no tengo ninguna pues no he levantado los otros procesos(ni siquiera los he configurado tampoco).
+
+NOTA: un poco más abajo puedo ver la RAM que está consumiento(unos 96mb),los nucleos,uso de esa RAM,la IP...
+
+				CONFIGURING EUREKA CLIENTS
+
+Empecemos por el customer.Vamos al pom.xml y añado la dependency para el eureka-server(fijate que será client y no server) 
+.Fijate que tendré que hacer lo mismo para cada sistema que quiera comunicarse y ser accesable por otros.
+
+   <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+   </dependency>
+
+Y de igual manera tendré que anotar la clase principal,pero con @EnableEurekaClient en vez de con @EnableEurekaServer:
+
+@SpringBootApplication
+@EnableEurekaClient
+public class CustomerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(CustomerApplication.class,args);
+    }
+}
+
+Por último añado esto al application.yml:
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+
+Repetir proceso para el MS fraud,aunque primero vamos a levantar este proceso parasegurarnos que lo hicimos correctamente
+NOTA:puedo ver que siempre debo nombrar las aplicaciones con spring.application.name
+
+Si replico alguna aplicación veré también que son recogidas en base al name,asi que es importantísimo pues nombrar los servicios.
+
+					COMUNICATION - LOAD BALANCING REQUESTS
+
+Recordemos que el objetivo principal de usr Eureka Server es no tener que usar código en duro de esta forma(y solo tener que ocuparnos del nombre:
+
+Cambiamos esto:
+  FraudCheckResponse fraudCheckResponse =  restTemplate
+    .getForObject(
+      "http://localhost:8081/api/v1/fraud-check/{customerId}",
+     FraudCheckResponse.class, customer.getId());
+
+por esto:
+   FraudCheckResponse fraudCheckResponse =  restTemplate
+                .getForObject(
+                        "http://FRAUD/api/v1/fraud-check/{customerId}",
+                FraudCheckResponse.class, customer.getId());
+
+Ojo,es el nombre en uppercase.Esto no es todo.RestTemplate estará confuso,no sabe a que instancia de FRAUD debe mandar la petición.¿Como puede saberlo?Necesita la annotation @LoadBalanced:
+
+* En CustomerConfig.java:
+@Configuration
+public class CustomerConfig {
+
+    @Bean
+    @LoadBalanced
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+}
+Ahora si,RestTemplate ya sabŕa balancear las peticiones a cada Servicio(en Rounded Robbin | equitativamente).
+Service Discovery es un concepto importante que debo entender.Cuando use Kubernetes obtendré Service Discovery free,lo cual es un dolor de cabeza menos del que preocuparse.Sin embargo debe quedar claro el concepto,y lo hizo.
+
+				VIDEO 04 LOAD BALANCES - WHAT IS A LOAD BALANCER
+
 
