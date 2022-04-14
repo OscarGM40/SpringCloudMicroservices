@@ -419,4 +419,57 @@ Service Discovery es un concepto importante que debo entender.Cuando use Kuberne
 
 				VIDEO 04 LOAD BALANCES - WHAT IS A LOAD BALANCER
 
+Imagina que tu aplicación esta en una única VM  que recibe un tráfico de 10k clientes.Ya puede tener 32 o 64 nucleos,la RAM necesaria para gestionar esto,etc.
 
+Imagina que ahora recibe 100k clientes,si bien podría escalar la VM horizontalmente,usualmente lo que se hace es tener varias VM(replicas) y balancear las peticiones
+
+Normalmente se suele dejar a los Cloud Providers que configuren y mantengan el LB,ya que lleva mucha configuración y es un SPOF(se les suele llamar fully managed load balancer,ya que están totalmente controlados por el Provider de IaaS).
+
+En cuanto al algoritmo de balanceo de carga el más común es Round Robin(distribución secuencial) ,pero también hay otros como el que menos conexiones tenga con el clientea recibe la petición(least connections) o least time(el servidor que actuará antes recibe la petición)
+
+Existe un concepto llamado 'health check'.Un load balancer solo targeteará a máquinas 'healthy'.El mecanismo que controla esto es el health check,otorgando el status de healthy a los microservicios.
+Si un MS se comunica con una DB esta comunicación influirá en el status de healthy o no.
+IMPORTANTE: Spring Cloud Gateway proporciona un LB en un entorno Kubernetes
+
+			VIDEO 05 RABBITMQ - TEORIA E IMPLEMENTACIÓN
+
+Imagina que hay un microservicio que tarda 10 segundos en realizar una acción(por ejemplo twilio tarda 10 segundos en mandar un email).Los otros microservicios como customer tendrán que esperar ese tiempo.
+Esto es inviable,no puede suceder(fijate que además ahora mismo tengo comunicación sincrona entre mis microservicios,tienen que esperarse entre ellos).
+
+Todo esto se arregla con una message queue.Si el servicio que manda los emails tarda un poco customer no esperará,ya se mandará ese mensaje.
+Como broker de mensajeria podemos usar Apache Kafka o RabbitMQ.Si bien el primero provee storage RabbitMQ es más simple a la hora de empezar con uno.
+Su integración con Spring es muy sencilla.
+NOTA: también tengo Amazon Simple Queue Service(ASQS) si quiero usar otra integración.Es totalmente autogestionado por Amazon.
+Recuerda que el broker recibe mensajes de los Publisher y los devuelve a los Consumers/Listeners.
+Dado que se usa un protocolo de red(http) los publishers,consumers y el broker pueden residir en diferentes máquinas
+
+IMPORTANTE: fijate que implementando un broker la ganancia en la aplicación en cuanto a asincronia,etc es abismal.Obviamente no se puede concebir una app hoy en día sin una message queue.Los beneficios de usar RabbitMQ son:
+1- Loose coupling:favorece el desacoplamiento,cada MS puede vivir en una VM diferente:
+2- Performance: ganamos performance ya que si cae un MS los demás aún podrán mandar los eventos y seguir funcionando perfectamente.Una vez el MS caido se levante,se pondrá al día consumiendo los eventos perdidos,etc...
+3- Asynchronous: ya mencionado,ganamos la capacidad de usar asincronía.
+4-Escalabilidad: puedo replicar el broker perfectamente(incluso se debe)
+5-Language Agnostic: el broker de mensajeria es agnostico al lenguaje,simplemente hay que usar las estructuras de datos adecuadas.
+6- Acks: mientras el Consumer no haga aknowledge de que ha recibido el mensaje ses le seguirá enviando
+7-ManagementUI: RabbitMQ ofrece una UI gráfica.
+8-Plugins: la comunidad ha construido multitud de plugins para RabbitMQ
+9-Cloud:perfectamente integrado con la Cloud,puedo ejecutar RabbitMQ con Docker y desplegarlo en cualquier provider.
+
+				FUNCIONAMIENTO DE RABBITMQ
+
+Cuando un Producer manda un mensaje primero entrará en una zona llamada Exchange(como una Staging area).Alli el Exchange forwardeará los messages basandose en un routing pattern hacia una determinada Queue.
+Puedo tener cuantas Queue quiera,y tambien tantos Exchange como quiera.
+
+En cuanto al type of exchange puedo elegir mandar el evento a cada Queue,mandarlo a uno solo,usar topics(una capa de abstración mas,al mandar el evento el Producer tiene que decir el tópico,una keyword cualquiera,al enrutarlo el Exchange las Queue además deben estar escuchando a ese topic).
+Por último esta el headers exchange que usa el header del mensaje para enrutar hacia las Queue.RabbitMQ tiene otro más,que es el nameless exchange,y es donde el routing key es igual al Queue Name,es decir que pongo el nombre de la cola como routing key.
+
+Veamos como implementarlo con Docker.Es realmente sencillo:
+  rabbitmq:
+    image: rabbitmq:3.9.11-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+Por el port 15672 sale la consola de management,por el 5672 sale rabbit(entiendo que apuntarán aqui)
+>docker-compose up -d <- actualizaŕá lo necesario.
+IMPORTANTE:puedo abrir esa managementUI en localhost:15672 (user:guest,password:guest)
+En esta interfaz Web puedo ver las connections,los channels,los exchanges,queues
